@@ -81,3 +81,43 @@ export async function resolveOpSecretsInEnv(
 
   return result;
 }
+
+/**
+ * Fetches environment variables from a 1Password Environment (beta).
+ * Requires the beta 1Password SDK. Uses same auth as secret refs (OP_SERVICE_ACCOUNT_TOKEN or OP_ACCOUNT).
+ * @see https://developer.1password.com/docs/sdks/environments/
+ */
+export async function getEnvFrom1PasswordEnvironment(
+  environmentId: string,
+  integrationVersion?: string,
+): Promise<Record<string, string>> {
+  const version = integrationVersion ?? "v2.4.0";
+  const sdk = await import("@1password/sdk");
+  const auth =
+    process.env.OP_SERVICE_ACCOUNT_TOKEN ??
+    (process.env.OP_ACCOUNT
+      ? new sdk.DesktopAuth(process.env.OP_ACCOUNT)
+      : undefined);
+
+  if (!auth) {
+    throw new Error(
+      `1Password Environment "${environmentId}" requires 1Password to be configured. Set OP_SERVICE_ACCOUNT_TOKEN or OP_ACCOUNT.`,
+    );
+  }
+
+  const client = await sdk.createClient({
+    auth,
+    integrationName: "Vercel Sandbox",
+    integrationVersion: version,
+  });
+
+  const res = await client.environments.getVariables(environmentId);
+  if (!res?.variables?.length) {
+    return {};
+  }
+
+  const env = Object.fromEntries(res.variables.map((v) => [v.name, v.value]));
+  const resolvedEnv = await resolveOpSecretsInEnv(env, version);
+
+  return resolvedEnv;
+}

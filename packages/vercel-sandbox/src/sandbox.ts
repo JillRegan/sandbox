@@ -18,7 +18,7 @@ import {
   type NetworkTransformer,
 } from "./network-policy";
 import { convertSandbox, type ConvertedSandbox } from "./utils/convert-sandbox";
-import { resolveOpSecretsInEnv } from "./utils/resolve-op-secrets";
+import { resolveOpSecretsInEnv, getEnvFrom1PasswordEnvironment } from "./utils/resolve-op-secrets";
 
 export type { NetworkPolicy, NetworkPolicyRule, NetworkTransformer };
 
@@ -79,12 +79,13 @@ export interface BaseCreateSandboxParams {
   networkPolicy?: NetworkPolicy;
 
   /**
-   * Environment configuration. Use `secretsFrom1Password` to provide
-   * 1Password secret references (op://vault/item/field); they are resolved
-   * at creation time and merged into the environment for every command.
+   * Environment configuration.
+   * - **secretsFrom1Password**: 1Password secret references (op://vault/item/field); resolved at creation time and merged into the environment for every command.
+   * - **from1PasswordEnvironment**: 1Password Environment ID; all variables from that Environment are loaded (op:// refs resolved), then merged into the environment for every command.
    */
   env?: {
     secretsFrom1Password?: Record<string, string>;
+    from1PasswordEnvironment?: string;
   };
 
   /**
@@ -111,12 +112,13 @@ interface GetSandboxParams {
   signal?: AbortSignal;
 
   /**
- * Environment configuration. Use `secretsFrom1Password` to provide
- * 1Password secret references; they are resolved when getting the sandbox
- * and merged into the environment for every command run with this instance.
- */
+   * Environment configuration.
+   * - **secretsFrom1Password**: 1Password secret references (op://vault/item/field); resolved at creation time and merged into the environment for every command.
+   * - **from1PasswordEnvironment**: 1Password Environment ID; all variables from that Environment are loaded (op:// refs resolved), then merged into the environment for every command.
+   */
   env?: {
     secretsFrom1Password?: Record<string, string>;
+    from1PasswordEnvironment?: string;
   };
 }
 
@@ -282,6 +284,10 @@ export class Sandbox {
       defaultEnv = await resolveOpSecretsInEnv(params.env.secretsFrom1Password);
     }
 
+    if (params?.env?.from1PasswordEnvironment) {
+      defaultEnv = await getEnvFrom1PasswordEnvironment(params.env.from1PasswordEnvironment);
+    }
+
     const sandbox = await client.createSandbox({
       source: params?.source,
       projectId: credentials.projectId,
@@ -330,6 +336,9 @@ export class Sandbox {
     let defaultEnv: Record<string, string> = {};
     if (params?.env?.secretsFrom1Password) {
       defaultEnv = await resolveOpSecretsInEnv(params.env.secretsFrom1Password);
+    }
+    if (params?.env?.from1PasswordEnvironment) {
+      defaultEnv = await getEnvFrom1PasswordEnvironment(params.env.from1PasswordEnvironment);
     }
 
     return new Sandbox({

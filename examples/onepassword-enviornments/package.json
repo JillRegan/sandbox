@@ -1,0 +1,17 @@
+{
+    "name": "onepassword-envs-example",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Example: load sandbox env from a 1Password Environment (beta)",
+    "type": "module",
+    "scripts": {
+      "start": "node --env-file .env.local --experimental-strip-types onepassword-envs.ts"
+    },
+    "dependencies": {
+      "@vercel/sandbox": "workspace:*"
+    },
+    "devDependencies": {
+      "@types/node": "^22.0.0",
+      "typescript": "^5.0.0"
+    }
+  }
