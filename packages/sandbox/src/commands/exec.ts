@@ -69,6 +69,12 @@ export const args = {
     type: ObjectFromKeyValue,
     description: "Environment variables to set for the command",
   }),
+  opEnvironmentId: cmd.option({
+    long: "op-environment-id",
+    description:
+      "1Password Environment ID; load its variables for this command (requires OP_SERVICE_ACCOUNT_TOKEN)",
+    type: cmd.optional(cmd.string),
+  }),
   scope,
 } as const;
 
@@ -86,6 +92,7 @@ export const exec = cmd.command({
     interactive,
     envVars,
     skipExtendingTimeout,
+    opEnvironmentId,
   }) {
     const sandbox =
       typeof sandboxId !== "string"
@@ -96,6 +103,7 @@ export const exec = cmd.command({
             teamId: team,
             token,
             __includeSystemRoutes: true,
+            env: { from1PasswordEnvironment: opEnvironmentId },
           });
 
     if (!["pending", "running"].includes(sandbox.status)) {

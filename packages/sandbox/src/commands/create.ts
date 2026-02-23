@@ -52,6 +52,12 @@ export const args = {
       "Start an interactive shell session after creating the sandbox",
   }),
   ...networkPolicyArgs,
+  opEnvironmentId: cmd.option({
+    long: "op-environment-id",
+    description:
+      "1Password Environment ID; load its variables into the sandbox (requires OP_SERVICE_ACCOUNT_TOKEN)",
+    type: cmd.optional(cmd.string),
+  }),
   scope,
 } as const;
 
@@ -77,6 +83,7 @@ export const create = cmd.command({
     allowedDomains,
     allowedCIDRs,
     deniedCIDRs,
+    opEnvironmentId,
   }) {
     const networkPolicy = buildNetworkPolicy({
       networkPolicy: networkPolicyMode,
@@ -96,6 +103,7 @@ export const create = cmd.command({
           timeout: ms(timeout),
           networkPolicy,
           __interactive: true,
+          env: { from1PasswordEnvironment: opEnvironmentId },
         })
       : await sandboxClient.create({
           teamId: scope.team,
@@ -106,6 +114,7 @@ export const create = cmd.command({
           timeout: ms(timeout),
           networkPolicy,
           __interactive: true,
+          env: { from1PasswordEnvironment: opEnvironmentId },
         });
     spinner?.stop();
 
@@ -163,6 +172,7 @@ export const create = cmd.command({
         cwd: undefined,
         skipExtendingTimeout: false,
         envVars: {},
+        opEnvironmentId: undefined,
         command: "sh",
         interactive: true,
         tty: true,
