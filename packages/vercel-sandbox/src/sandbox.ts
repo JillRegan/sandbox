@@ -79,6 +79,20 @@ export interface BaseCreateSandboxParams {
   networkPolicy?: NetworkPolicy;
 
   /**
+   * Default environment variables for the sandbox.
+   * These are inherited by all commands unless overridden with
+   * the `env` option in `runCommand`.
+   *
+   * @example
+   * const sandbox = await Sandbox.create({
+   *   env: { NODE_ENV: "production", API_KEY: "secret" },
+   * });
+   * // All commands will have NODE_ENV and API_KEY set
+   * await sandbox.runCommand("node", ["app.js"]);
+   */
+  env?: Record<string, string>;
+
+  /**
    * Integrations for injecting secrets into the sandbox. Use
    * `integrations.onePassword.secrets` to provide 1Password secret references
    * (op://vault/item/field); they are resolved at creation time and merged
@@ -311,6 +325,7 @@ export class Sandbox {
       resources: params?.resources,
       runtime: params && "runtime" in params ? params?.runtime : undefined,
       networkPolicy: params?.networkPolicy,
+      env: params?.env,
       signal: params?.signal,
       ...privateParams,
     });
@@ -456,26 +471,26 @@ export class Sandbox {
    */
   async _runCommand(params: RunCommandParams) {
     const wait = params.detached ? false : true;
-    const getLogs = (command: Command) => {
-      if (params.stdout || params.stderr) {
-        (async () => {
-          try {
-            for await (const log of command.logs({ signal: params.signal })) {
-              if (log.stream === "stdout") {
-                params.stdout?.write(log.data);
-              } else if (log.stream === "stderr") {
-                params.stderr?.write(log.data);
-              }
-            }
-          } catch (err) {
-            if (params.signal?.aborted) {
-              return;
-            }
-            throw err;
-          }
-        })();
+    const pipeLogs = async (command: Command): Promise<void> => {
+      if (!params.stdout && !params.stderr) {
+        return;
       }
-    }
+
+      try {
+        for await (const log of command.logs({ signal: params.signal })) {
+          if (log.stream === "stdout") {
+            params.stdout?.write(log.data);
+          } else if (log.stream === "stderr") {
+            params.stderr?.write(log.data);
+          }
+        }
+      } catch (err) {
+        if (params.signal?.aborted) {
+          return;
+        }
+        throw err;
+      }
+    };
 
     if (wait) {
       const commandStream = await this.client.runCommand({
@@ -495,9 +510,10 @@ export class Sandbox {
         cmd: commandStream.command,
       });
 
-      getLogs(command);
-
-      const finished = await commandStream.finished;
+      const [finished] = await Promise.all([
+        commandStream.finished,
+        pipeLogs(command),
+      ]);
       return new CommandFinished({
         client: this.client,
         sandboxId: this.sandbox.id,
@@ -522,7 +538,12 @@ export class Sandbox {
       cmd: commandResponse.json.command,
     });
 
-    getLogs(command);
+    void pipeLogs(command).catch((err) => {
+      if (params.signal?.aborted) {
+        return;
+      }
+      (params.stderr ?? params.stdout)?.emit('error', err)
+    });
 
     return command;
   }

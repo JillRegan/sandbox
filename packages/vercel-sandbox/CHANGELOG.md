@@ -1,5 +1,26 @@
 # @vercel/sandbox
 
+## 1.8.1
+
+### Patch Changes
+
+- Fix unhandled promise rejection when running a command while the sandbox is stopping ([#82](https://github.com/vercel/sandbox/pull/82))
+
+## 1.8.0
+
+### Minor Changes
+
+- Add support for default environment variables in `Sandbox.create()`. These environment variables are inherited by all commands unless overridden with the `env` option in `runCommand`. ([#70](https://github.com/vercel/sandbox/pull/70))
+
+  ```ts
+  const sandbox = await Sandbox.create({
+    env: { HELLO: "world" },
+  });
+
+  // All commands will have HELLO=world
+  await sandbox.runCommand("bash", ["-c", 'echo "Hello $HELLO"']);
+  ```
+
 ## 1.7.1
 
 ### Patch Changes
