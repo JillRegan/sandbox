@@ -1,3 +1,4 @@
+import { VERSION } from "../version";
 /**
  * Resolves 1Password secret references (op://vault/item/field) in environment
  * variable values using the 1Password JavaScript SDK.
@@ -7,20 +8,15 @@
  */
 
 const OP_REF_PREFIX = "op://";
-/** Matches op://vault/item/field or op://vault/item/section/field (value must be exactly the reference). */
-const OP_REF_REGEX = /^op:\/\/.+$/;
 
 function isOpReference(value: string): boolean {
   const trimmed = value.trim();
-  return (
-    trimmed.startsWith(OP_REF_PREFIX) && OP_REF_REGEX.test(trimmed)
-  );
+  return trimmed.startsWith(OP_REF_PREFIX);
 }
-
 /**
- * Resolves any env values that are 1Password secret references (op://...)
- * in place. Non-op values are left unchanged. Requires 1Password auth
- * (OP_SERVICE_ACCOUNT_TOKEN or 1Password desktop app with DesktopAuth).
+ * Resolves any env values that are 1Password secret references (op://...).
+ * Returns a new record with those values replaced by resolved secrets; non-op values are copied over.
+ * Requires 1Password auth (OP_SERVICE_ACCOUNT_TOKEN or 1Password desktop app with DesktopAuth).
  *
  * @param env - Record of env var names to values; values that are op:// refs are resolved
  * @param integrationVersion - Version string for the 1Password SDK integration (e.g. "v2.4.0")
@@ -31,7 +27,7 @@ export async function resolveOpSecretsInEnv(
   env: Record<string, string>,
   integrationVersion?: string,
 ): Promise<Record<string, string>> {
-  const version = integrationVersion ?? "v2.4.0";
+  const integrationVersionToUse = integrationVersion ?? `v${VERSION}`;
   const refs = new Map<string, string>();
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === "string" && isOpReference(value)) {
@@ -64,7 +60,7 @@ export async function resolveOpSecretsInEnv(
   const client = await sdk.createClient({
     auth,
     integrationName: "Vercel Sandbox",
-    integrationVersion: version,
+    integrationVersion: integrationVersionToUse,
   });
 
   const result = { ...env };

@@ -18,7 +18,7 @@ async function main() {
 
   const result = await sandbox.runCommand("bash", [
     "-c",
-    "echo \"MY_SECRET is set: ${MY_SECRET:+yes}\" && echo \"Length: ${#MY_SECRET}\"",
+    'echo "MY_SECRET is set: $([ -n "$MY_SECRET" ] && echo yes || echo no)" && echo "Length: ${#MY_SECRET}"',
   ]);
 
   console.log(await result.stdout());

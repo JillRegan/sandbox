@@ -45,19 +45,6 @@ importers:
         specifier: 5.8.3
         version: 5.8.3
 
-  examples/1password-secrets:
-    dependencies:
-      '@vercel/sandbox':
-        specifier: workspace:*
-        version: link:../../packages/vercel-sandbox
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.15.12
-      typescript:
-        specifier: ^5.0.0
-        version: 5.8.3
-
   examples/ai-example:
     dependencies:
       '@ai-sdk/gateway':
@@ -221,6 +208,19 @@ importers:
       '@types/node':
         specifier: ^20
         version: 20.19.11
+
+  examples/onepassword-secrets:
+    dependencies:
+      '@vercel/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/vercel-sandbox
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.15.12
+      typescript:
+        specifier: ^5.0.0
+        version: 5.8.3
 
   examples/private-repo:
     dependencies:
