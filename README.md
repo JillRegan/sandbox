@@ -158,6 +158,7 @@ const sandbox = await Sandbox.create({
   },
 });
 ```
+
 ### Service account token
 
 The integration needs a [1Password service account][op-service-account]. The SDK reads `OP_SERVICE_ACCOUNT_TOKEN` from the process environment when resolving `op://` references. You can set it in any of these ways:
@@ -170,6 +171,14 @@ Add `OP_SERVICE_ACCOUNT_TOKEN` in your Vercel project or team under **Settings â
 **Local development**
   1. Add `OP_SERVICE_ACCOUNT_TOKEN` to your `.env` or `.env.local` (or run `vercel env pull` to pull Vercel env vars into `.env.local`).
   2. Run your script so it loads that file (e.g. `node --env-file=.env.local your-script.mjs` or use a loader like `dotenv`).
+
+## Workflow DevKit integration
+
+`Sandbox` and `CommandFinished` support serialization with the
+[Workflow DevKit](https://vercel.com/docs/workflow). When a sandbox instance
+crosses a step boundary the SDK serializes sandbox metadata and routes, then
+rehydrates synchronously from that snapshot. Deserialized instances lazily
+recreate an API client using OIDC or environment credentials when needed.
 
 ## Limitations
 
@@ -241,6 +250,16 @@ available [here](https://docs.aws.amazon.com/linux/al2023/release-notes/all-pack
 [op-secret-refs]: https://developer.1password.com/docs/cli/secret-references/
 [op-service-account]: https://developer.1password.com/docs/service-accounts/
 [op-sdk-auth]: https://developer.1password.com/docs/sdks/concepts/#authentication
+
+## Coding Assistant Skill
+
+This repo includes a [coding assistant skill](./skills/sandbox/SKILL.md) for Cursor, Codex, and other coding assistants. To install:
+
+```sh
+npx skills add vercel/sandbox
+```
+
+The skill provides comprehensive guidance on using the `@vercel/sandbox` SDK, including code patterns, best practices, and API reference.
 
 ## Authors
 

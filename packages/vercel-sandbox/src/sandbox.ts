@@ -1,23 +1,27 @@
-import type { SandboxMetaData, SandboxRouteData } from "./api-client";
-import { type Writable } from "stream";
-import { pipeline } from "stream/promises";
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
 import { createWriteStream } from "fs";
 import { mkdir } from "fs/promises";
 import { dirname, resolve } from "path";
-import { APIClient } from "./api-client";
-import { Command, CommandFinished } from "./command";
-import { type Credentials, getCredentials } from "./utils/get-credentials";
-import { getPrivateParams, WithPrivate } from "./utils/types";
-import { WithFetchOptions } from "./api-client/api-client";
-import { RUNTIMES } from "./constants";
-import { Snapshot } from "./snapshot";
-import { consumeReadable } from "./utils/consume-readable";
+import type { Writable } from "stream";
+import { pipeline } from "stream/promises";
+import type { WithFetchOptions } from "./api-client/api-client.js";
+import type { SandboxMetaData, SandboxRouteData } from "./api-client/index.js";
+import { APIClient } from "./api-client/index.js";
+import { Command, CommandFinished } from "./command.js";
+import type { RUNTIMES } from "./constants.js";
+import type {
+  NetworkPolicy,
+  NetworkPolicyRule,
+  NetworkTransformer,
+} from "./network-policy.js";
+import { Snapshot } from "./snapshot.js";
+import { consumeReadable } from "./utils/consume-readable.js";
+import { type Credentials, getCredentials } from "./utils/get-credentials.js";
 import {
-  type NetworkPolicy,
-  type NetworkPolicyRule,
-  type NetworkTransformer,
-} from "./network-policy";
-import { convertSandbox, type ConvertedSandbox } from "./utils/convert-sandbox";
+  type SandboxSnapshot,
+  toSandboxSnapshot,
+} from "./utils/sandbox-snapshot.js";
+import { getPrivateParams, type WithPrivate } from "./utils/types.js";
 import { resolveOpSecretsInEnv } from "./utils/resolve-op-secrets";
 
 export type { NetworkPolicy, NetworkPolicyRule, NetworkTransformer };
@@ -140,6 +144,14 @@ interface GetSandboxParams {
   };
 }
 
+/**
+ * Serialized representation of a Sandbox for @workflow/serde.
+ */
+export interface SerializedSandbox {
+  metadata: SandboxSnapshot;
+  routes: SandboxRouteData[];
+}
+
 /** @inline */
 interface RunCommandParams {
   /**
@@ -180,6 +192,10 @@ interface RunCommandParams {
   signal?: AbortSignal;
 }
 
+// ============================================================================
+// Sandbox class
+// ============================================================================
+
 /**
  * A Sandbox is an isolated Linux MicroVM to run commands in.
  *
@@ -187,7 +203,25 @@ interface RunCommandParams {
  * @hideconstructor
  */
 export class Sandbox {
-  private readonly client: APIClient;
+  private _client: APIClient | null = null;
+
+  /**
+   * Lazily resolve credentials and construct an API client.
+   * This is used in step contexts where the Sandbox was deserialized
+   * without a client (e.g. when crossing workflow/step boundaries).
+   * Uses getCredentials() which resolves from OIDC or env vars.
+   * @internal
+   */
+  private async ensureClient(): Promise<APIClient> {
+    "use step";
+    if (this._client) return this._client;
+    const credentials = await getCredentials();
+    this._client = new APIClient({
+      teamId: credentials.teamId,
+      token: credentials.token,
+    });
+    return this._client;
+  }
   private readonly defaultEnv: Record<string, string>;
 
   /**
@@ -252,14 +286,16 @@ export class Sandbox {
   /**
    * The amount of network data used by the sandbox. Only reported once the VM is stopped.
    */
-  public get networkTransfer(): {ingress: number, egress: number} | undefined {
+  public get networkTransfer():
+    | { ingress: number; egress: number }
+    | undefined {
     return this.sandbox.networkTransfer;
   }
 
   /**
    * Internal metadata about this sandbox.
    */
-  private sandbox: ConvertedSandbox;
+  private sandbox: SandboxSnapshot;
 
   /**
    * Allow to get a list of sandboxes for a team narrowed to the given params.
@@ -271,6 +307,7 @@ export class Sandbox {
       Partial<Credentials> &
       WithFetchOptions,
   ) {
+    "use step";
     const credentials = await getCredentials(params);
     const client = new APIClient({
       teamId: credentials.teamId,
@@ -280,6 +317,35 @@ export class Sandbox {
     return client.listSandboxes({
       ...credentials,
       ...params,
+    });
+  }
+
+  /**
+   * Serialize a Sandbox instance to plain data for @workflow/serde.
+   *
+   * @param instance - The Sandbox instance to serialize
+   * @returns A plain object containing sandbox metadata and routes
+   */
+  static [WORKFLOW_SERIALIZE](instance: Sandbox): SerializedSandbox {
+    return {
+      metadata: instance.sandbox,
+      routes: instance.routes,
+    };
+  }
+
+  /**
+   * Deserialize a Sandbox from serialized snapshot data.
+   *
+   * The deserialized instance uses the serialized metadata synchronously and
+   * lazily creates an API client only when methods perform API requests.
+   *
+   * @param data - The serialized sandbox data
+   * @returns The reconstructed Sandbox instance
+   */
+  static [WORKFLOW_DESERIALIZE](data: SerializedSandbox): Sandbox {
+    return new Sandbox({
+      sandbox: data.metadata,
+      routes: data.routes,
     });
   }
 
@@ -301,6 +367,7 @@ export class Sandbox {
     > &
       WithFetchOptions,
   ): Promise<Sandbox & AsyncDisposable> {
+    "use step";
     const credentials = await getCredentials(params);
     const client = new APIClient({
       teamId: credentials.teamId,
@@ -332,7 +399,7 @@ export class Sandbox {
 
     return new DisposableSandbox({
       client,
-      sandbox: sandbox.json.sandbox,
+      sandbox: toSandboxSnapshot(sandbox.json.sandbox),
       routes: sandbox.json.routes,
       defaultEnv,
     });
@@ -348,6 +415,7 @@ export class Sandbox {
     params: WithPrivate<GetSandboxParams | (GetSandboxParams & Credentials)> &
       WithFetchOptions,
   ): Promise<Sandbox> {
+    "use step";
     const credentials = await getCredentials(params);
     const client = new APIClient({
       teamId: credentials.teamId,
@@ -371,26 +439,33 @@ export class Sandbox {
 
     return new Sandbox({
       client,
-      sandbox: sandbox.json.sandbox,
+      sandbox: toSandboxSnapshot(sandbox.json.sandbox),
       routes: sandbox.json.routes,
       defaultEnv,
     });
   }
 
+  /**
+   * Create a new Sandbox instance.
+   *
+   * @param params.client - Optional API client. If not provided, will be lazily created using global credentials.
+   * @param params.routes - Port-to-subdomain mappings for exposed ports
+   * @param params.sandbox - Sandbox snapshot metadata
+   */
   constructor({
     client,
     routes,
     sandbox,
     defaultEnv,
   }: {
-    client: APIClient;
+    client?: APIClient;
     routes: SandboxRouteData[];
-    sandbox: SandboxMetaData;
+    sandbox: SandboxSnapshot;
     defaultEnv?: Record<string, string>;
   }) {
-    this.client = client;
+    this._client = client ?? null;
     this.routes = routes;
-    this.sandbox = convertSandbox(sandbox);
+    this.sandbox = sandbox;
     this.defaultEnv = defaultEnv ?? {};
   }
 
@@ -406,14 +481,16 @@ export class Sandbox {
     cmdId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<Command> {
-    const command = await this.client.getCommand({
+    "use step";
+    const client = await this.ensureClient();
+    const command = await client.getCommand({
       sandboxId: this.sandbox.id,
       cmdId,
       signal: opts?.signal,
     });
 
     return new Command({
-      client: this.client,
+      client,
       sandboxId: this.sandbox.id,
       cmd: command.json.command,
     });
@@ -457,19 +534,13 @@ export class Sandbox {
     args?: string[],
     opts?: { signal?: AbortSignal },
   ): Promise<Command | CommandFinished> {
-    return typeof commandOrParams === "string"
-      ? this._runCommand({ cmd: commandOrParams, args, signal: opts?.signal })
-      : this._runCommand(commandOrParams);
-  }
+    "use step";
+    const client = await this.ensureClient();
+    const params: RunCommandParams =
+      typeof commandOrParams === "string"
+        ? { cmd: commandOrParams, args, signal: opts?.signal }
+        : commandOrParams;
 
-  /**
-   * Internal helper to start a command in the sandbox.
-   *
-   * @param params - Command execution parameters.
-   * @returns A {@link Command} or {@link CommandFinished}, depending on `detached`.
-   * @internal
-   */
-  async _runCommand(params: RunCommandParams) {
     const wait = params.detached ? false : true;
     const pipeLogs = async (command: Command): Promise<void> => {
       if (!params.stdout && !params.stderr) {
@@ -493,7 +564,7 @@ export class Sandbox {
     };
 
     if (wait) {
-      const commandStream = await this.client.runCommand({
+      const commandStream = await client.runCommand({
         sandboxId: this.sandbox.id,
         command: params.cmd,
         args: params.args ?? [],
@@ -505,7 +576,7 @@ export class Sandbox {
       });
 
       const command = new Command({
-        client: this.client,
+        client,
         sandboxId: this.sandbox.id,
         cmd: commandStream.command,
       });
@@ -515,14 +586,14 @@ export class Sandbox {
         pipeLogs(command),
       ]);
       return new CommandFinished({
-        client: this.client,
+        client,
         sandboxId: this.sandbox.id,
         cmd: finished,
         exitCode: finished.exitCode ?? 0,
       });
     }
 
-    const commandResponse = await this.client.runCommand({
+    const commandResponse = await client.runCommand({
       sandboxId: this.sandbox.id,
       command: params.cmd,
       args: params.args ?? [],
@@ -533,7 +604,7 @@ export class Sandbox {
     });
 
     const command = new Command({
-      client: this.client,
+      client,
       sandboxId: this.sandbox.id,
       cmd: commandResponse.json.command,
     });
@@ -542,7 +613,7 @@ export class Sandbox {
       if (params.signal?.aborted) {
         return;
       }
-      (params.stderr ?? params.stdout)?.emit('error', err)
+      (params.stderr ?? params.stdout)?.emit("error", err);
     });
 
     return command;
@@ -556,7 +627,9 @@ export class Sandbox {
    * @param opts.signal - An AbortSignal to cancel the operation.
    */
   async mkDir(path: string, opts?: { signal?: AbortSignal }): Promise<void> {
-    await this.client.mkDir({
+    "use step";
+    const client = await this.ensureClient();
+    await client.mkDir({
       sandboxId: this.sandbox.id,
       path: path,
       signal: opts?.signal,
@@ -575,7 +648,9 @@ export class Sandbox {
     file: { path: string; cwd?: string },
     opts?: { signal?: AbortSignal },
   ): Promise<NodeJS.ReadableStream | null> {
-    return this.client.readFile({
+    "use step";
+    const client = await this.ensureClient();
+    return client.readFile({
       sandboxId: this.sandbox.id,
       path: file.path,
       cwd: file.cwd,
@@ -595,7 +670,9 @@ export class Sandbox {
     file: { path: string; cwd?: string },
     opts?: { signal?: AbortSignal },
   ): Promise<Buffer | null> {
-    const stream = await this.client.readFile({
+    "use step";
+    const client = await this.ensureClient();
+    const stream = await client.readFile({
       sandboxId: this.sandbox.id,
       path: file.path,
       cwd: file.cwd,
@@ -624,6 +701,8 @@ export class Sandbox {
     dst: { path: string; cwd?: string },
     opts?: { mkdirRecursive?: boolean; signal?: AbortSignal },
   ): Promise<string | null> {
+    "use step";
+    const client = await this.ensureClient();
     if (!src?.path) {
       throw new Error("downloadFile: source path is required");
     }
@@ -632,7 +711,7 @@ export class Sandbox {
       throw new Error("downloadFile: destination path is required");
     }
 
-    const stream = await this.client.readFile({
+    const stream = await client.readFile({
       sandboxId: this.sandbox.id,
       path: src.path,
       cwd: src.cwd,
@@ -653,7 +732,7 @@ export class Sandbox {
       });
       return dstPath;
     } finally {
-      stream.destroy()
+      stream.destroy();
     }
   }
 
@@ -662,16 +741,24 @@ export class Sandbox {
    * Defaults to writing to /vercel/sandbox unless an absolute path is specified.
    * Writes files using the `vercel-sandbox` user.
    *
-   * @param files - Array of files with path and stream/buffer contents
+   * @param files - Array of files with path, content, and optional mode (permissions)
    * @param opts - Optional parameters.
    * @param opts.signal - An AbortSignal to cancel the operation.
    * @returns A promise that resolves when the files are written
+   *
+   * @example
+   * // Write an executable script
+   * await sandbox.writeFiles([
+   *   { path: "/usr/local/bin/myscript", content: Buffer.from("#!/bin/bash\necho hello"), mode: 0o755 }
+   * ]);
    */
   async writeFiles(
-    files: { path: string; content: Buffer }[],
+    files: { path: string; content: Buffer; mode?: number }[],
     opts?: { signal?: AbortSignal },
   ) {
-    return this.client.writeFiles({
+    "use step";
+    const client = await this.ensureClient();
+    return client.writeFiles({
       sandboxId: this.sandbox.id,
       cwd: this.sandbox.cwd,
       extractDir: "/",
@@ -704,13 +791,18 @@ export class Sandbox {
    * @param opts.blocking - If true, poll until the sandbox has fully stopped and return the final state.
    * @returns The sandbox metadata at the time the stop was acknowledged, or after fully stopped if `blocking` is true.
    */
-  async stop(opts?: { signal?: AbortSignal; blocking?: boolean }): Promise<ConvertedSandbox> {
-    const response = await this.client.stopSandbox({
+  async stop(opts?: {
+    signal?: AbortSignal;
+    blocking?: boolean;
+  }): Promise<SandboxSnapshot> {
+    "use step";
+    const client = await this.ensureClient();
+    const response = await client.stopSandbox({
       sandboxId: this.sandbox.id,
       signal: opts?.signal,
       blocking: opts?.blocking,
     });
-    this.sandbox = convertSandbox(response.json.sandbox);
+    this.sandbox = toSandboxSnapshot(response.json.sandbox);
     return this.sandbox;
   }
 
@@ -749,14 +841,16 @@ export class Sandbox {
     networkPolicy: NetworkPolicy,
     opts?: { signal?: AbortSignal },
   ): Promise<NetworkPolicy> {
-    const response = await this.client.updateNetworkPolicy({
+    "use step";
+    const client = await this.ensureClient();
+    const response = await client.updateNetworkPolicy({
       sandboxId: this.sandbox.id,
       networkPolicy: networkPolicy,
       signal: opts?.signal,
     });
 
     // Update the internal sandbox metadata with the new timeout value
-    this.sandbox = convertSandbox(response.json.sandbox);
+    this.sandbox = toSandboxSnapshot(response.json.sandbox);
     return this.sandbox.networkPolicy!;
   }
 
@@ -780,14 +874,16 @@ export class Sandbox {
     duration: number,
     opts?: { signal?: AbortSignal },
   ): Promise<void> {
-    const response = await this.client.extendTimeout({
+    "use step";
+    const client = await this.ensureClient();
+    const response = await client.extendTimeout({
       sandboxId: this.sandbox.id,
       duration,
       signal: opts?.signal,
     });
 
     // Update the internal sandbox metadata with the new timeout value
-    this.sandbox = convertSandbox(response.json.sandbox);
+    this.sandbox = toSandboxSnapshot(response.json.sandbox);
   }
 
   /**
@@ -805,16 +901,18 @@ export class Sandbox {
     expiration?: number;
     signal?: AbortSignal;
   }): Promise<Snapshot> {
-    const response = await this.client.createSnapshot({
+    "use step";
+    const client = await this.ensureClient();
+    const response = await client.createSnapshot({
       sandboxId: this.sandbox.id,
       expiration: opts?.expiration,
       signal: opts?.signal,
     });
 
-    this.sandbox = convertSandbox(response.json.sandbox);
+    this.sandbox = toSandboxSnapshot(response.json.sandbox);
 
     return new Snapshot({
-      client: this.client,
+      client,
       snapshot: response.json.snapshot,
     });
   }
