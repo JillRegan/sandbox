@@ -144,7 +144,7 @@ const sandbox = await Sandbox.create({
 
 ## 1Password secrets
 
-Inject 1Password secrets into the sandbox using [secret references][op-secret-refs] (`op://vault/item/field`). Pass them in `integrations.onePassword.secrets` when creating a sandbox. They are resolved at creation and available to every command.
+Inject 1Password secrets into the sandbox using [secret references][op-secret-refs] (`op://vault/item/field`). Pass them in `integrations.onePassword.secrets` on `Sandbox.create` and/or `runCommand` (object params). They are resolved when the sandbox is created or when that command runs, then merged with `env` (`env` wins on duplicate keys).
 
 ```ts
 const sandbox = await Sandbox.create({
@@ -153,6 +153,22 @@ const sandbox = await Sandbox.create({
     onePassword: {
       secrets: {
         SOME_PRIVATE_KEY: "op://My Vault/My Item/private key",
+      },
+    },
+  },
+});
+```
+
+For a single command, pass the same shape on `runCommand` (object params). Integration secrets are merged with `env` for that run (`env` wins on duplicate keys); only `integrations.onePassword.secrets` values are resolved when they are `op://` references:
+
+```ts
+await sandbox.runCommand({
+  cmd: "bash",
+  args: ["-c", 'test -n "$TOKEN" && echo ok'],
+  integrations: {
+    onePassword: {
+      secrets: {
+        TOKEN: "op://My Vault/My Item/token",
       },
     },
   },
@@ -171,6 +187,10 @@ Add `OP_SERVICE_ACCOUNT_TOKEN` in your Vercel project or team under **Settings â
 **Local development**
   1. Add `OP_SERVICE_ACCOUNT_TOKEN` to your `.env` or `.env.local` (or run `vercel env pull` to pull Vercel env vars into `.env.local`).
   2. Run your script so it loads that file (e.g. `node --env-file=.env.local your-script.mjs` or use a loader like `dotenv`).
+
+### Security note
+
+Integrating with 1Password improves **security and convenience** compared to hard-coding secrets or scattering them across config: references stay in 1Password, access can follow **least privilege**, and rotation is centralized. After resolution, values are still **ordinary environment variables** inside the sandbox so use the same care you would with any secret (avoid logging env, protect `OP_SERVICE_ACCOUNT_TOKEN`, rotate if exposed).
 
 ## Workflow DevKit integration
 

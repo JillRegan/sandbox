@@ -12,6 +12,8 @@ import * as Exec from "./exec";
 import { networkPolicyArgs } from "../args/network-policy";
 import { buildNetworkPolicy } from "../util/network-policy";
 import { ObjectFromKeyValue } from "../args/key-value-pair";
+import { resolveOpSecretsInEnv } from "@vercel/sandbox";
+import { version } from "../pkg";
 
 export const args = {
   runtime,
@@ -97,6 +99,7 @@ export const create = cmd.command({
     });
 
     const resources = vcpus ? { vcpus } : undefined;
+    const resolvedEnvVars = await resolveOpSecretsInEnv(envVars, `v${version}`);
     const spinner = silent ? undefined : ora("Creating sandbox...").start();
     const sandbox = snapshot
       ? await sandboxClient.create({
@@ -108,7 +111,7 @@ export const create = cmd.command({
           timeout: ms(timeout),
           resources,
           networkPolicy,
-          env: envVars,
+          env: resolvedEnvVars,
           __interactive: true,
         })
       : await sandboxClient.create({
@@ -120,7 +123,7 @@ export const create = cmd.command({
           timeout: ms(timeout),
           resources,
           networkPolicy,
-          env: envVars,
+          env: resolvedEnvVars,
           __interactive: true,
         });
     spinner?.stop();

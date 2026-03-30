@@ -83,6 +83,46 @@ const makeCommand = (): CommandData => ({
   startedAt: 1,
 });
 
+describe("runCommand env + 1Password merge", () => {
+  it("passes merged env from integrations.onePassword.secrets and env to the client", async () => {
+    const command = makeCommand();
+    const runCommandMock = vi.fn(async ({ wait }: { wait?: boolean }) => {
+      if (wait) {
+        return {
+          command,
+          finished: Promise.resolve({ ...command, exitCode: 0 }),
+        };
+      }
+      return { json: { command } };
+    });
+
+    const sandbox = new Sandbox({
+      client: {
+        runCommand: runCommandMock,
+      } as unknown as APIClient,
+      routes: [],
+      sandbox: makeSandboxMetadata(),
+    });
+
+    await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-c", "true"],
+      integrations: {
+        onePassword: {
+          secrets: { FROM_OP: "plain-a" },
+        },
+      },
+      env: { FROM_OP: "env-wins", OTHER: "b" },
+    });
+
+    expect(runCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: { FROM_OP: "env-wins", OTHER: "b" },
+      }),
+    );
+  });
+});
+
 describe("_runCommand error handling", () => {
   it("rejects non-detached runCommand when log streaming fails", async () => {
     const command = makeCommand();

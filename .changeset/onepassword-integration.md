@@ -3,4 +3,4 @@
 "sandbox": minor
 ---
 
-Add 1Password integration: inject secrets into sandbox env via integrations.onePassword.secrets (op:// refs), resolve op:// in CLI exec --env, add example and docs for service account token.
+Add 1Password integration: resolve `op://` refs in `integrations.onePassword.secrets` when creating sandboxes and running commands; `env` is merged without resolving `op://`. CLI `sandbox exec --env` still resolves `op://` via `resolveOpSecretsInEnv`.

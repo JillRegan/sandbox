@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { VERSION } from "../version";
 /**
  * Resolves 1Password secret references (op://vault/item/field) in environment
@@ -8,6 +9,38 @@ import { VERSION } from "../version";
  */
 
 const OP_REF_PREFIX = "op://";
+
+/** Shape of `integrations` for 1Password merge (matches `Sandbox` create/run). */
+type OnePasswordIntegrations = {
+  onePassword?: { secrets: Record<string, string> };
+};
+
+/**
+ * Merge `integrations.onePassword.secrets` with `env`. Resolves `op://` only
+ * in integration secrets. `env` is applied as-is and wins on duplicate keys.
+ */
+export async function mergeEnvWithOnePassword(
+  integrations?: OnePasswordIntegrations,
+  env?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const envRecord = env ?? {};
+  const envKeys = new Set(Object.keys(envRecord));
+  const secrets = integrations?.onePassword?.secrets ?? {};
+
+  const integrationOnly: Record<string, string> = {};
+  for (const [key, value] of Object.entries(secrets)) {
+    if (!envKeys.has(key)) {
+      integrationOnly[key] = value;
+    }
+  }
+
+  const resolvedIntegration =
+    Object.keys(integrationOnly).length === 0
+      ? {}
+      : await resolveOpSecretsInEnv(integrationOnly);
+
+  return { ...resolvedIntegration, ...envRecord };
+}
 
 function isOpReference(value: string): boolean {
   const trimmed = value.trim();
@@ -39,7 +72,9 @@ export async function resolveOpSecretsInEnv(
     return env;
   }
 
-  const sdk = await import("@1password/sdk");
+  const sdk = createRequire(import.meta.url)("@1password/sdk") as typeof import(
+    "@1password/sdk"
+  );
   const auth =
     process.env.OP_SERVICE_ACCOUNT_TOKEN ??
     (process.env.OP_ACCOUNT

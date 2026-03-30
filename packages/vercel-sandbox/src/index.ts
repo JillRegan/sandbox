@@ -14,4 +14,7 @@ export type {
 } from "./command.js";
 export { StreamError } from "./api-client/api-error.js";
 export { APIError } from "./api-client/api-error.js";
-export { resolveOpSecretsInEnv } from "./utils/resolve-op-secrets";
+export {
+  mergeEnvWithOnePassword,
+  resolveOpSecretsInEnv,
+} from "./utils/onepassword-env.js";

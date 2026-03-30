@@ -22,7 +22,7 @@ import {
   toSandboxSnapshot,
 } from "./utils/sandbox-snapshot.js";
 import { getPrivateParams, type WithPrivate } from "./utils/types.js";
-import { resolveOpSecretsInEnv } from "./utils/resolve-op-secrets";
+import { mergeEnvWithOnePassword } from "./utils/onepassword-env.js";
 
 export type { NetworkPolicy, NetworkPolicyRule, NetworkTransformer };
 
@@ -99,8 +99,8 @@ export interface BaseCreateSandboxParams {
   /**
    * Integrations for injecting secrets into the sandbox. Use
    * `integrations.onePassword.secrets` to provide 1Password secret references
-   * (op://vault/item/field); they are resolved at creation time and merged
-   * into the environment for every command.
+   * (op://vault/item/field). Values are resolved at creation time and merged
+   * with `env` (duplicate keys use `env`).
    */
   integrations?: {
     onePassword?: {
@@ -130,18 +130,6 @@ interface GetSandboxParams {
    * An AbortSignal to cancel the operation.
    */
   signal?: AbortSignal;
-
-  /**
-   * Integrations for injecting secrets. Use `integrations.onePassword.secrets`
-   * to provide 1Password secret references; they are resolved when getting the
-   * sandbox and merged into the environment for every command run with this
-   * instance.
-   */
-  integrations?: {
-    onePassword?: {
-      secrets: Record<string, string>;
-    };
-  };
 }
 
 /**
@@ -170,6 +158,15 @@ interface RunCommandParams {
    * Environment variables to set for this command
    */
   env?: Record<string, string>;
+  /**
+   * 1Password secret references for this command only (`op://vault/item/field`).
+   * Resolved when the command runs, merged with `env` (duplicate keys use `env`).
+   */
+  integrations?: {
+    onePassword?: {
+      secrets: Record<string, string>;
+    };
+  };
   /**
    * If true, execute this command with root privileges. Defaults to false.
    */
@@ -222,11 +219,10 @@ export class Sandbox {
     });
     return this._client;
   }
-  private readonly defaultEnv: Record<string, string>;
 
   /**
    * Routes from ports to subdomains.
-  /* @hidden
+   * @hidden
    */
   public readonly routes: SandboxRouteData[];
 
@@ -377,12 +373,10 @@ export class Sandbox {
 
     const privateParams = getPrivateParams(params);
 
-    let defaultEnv: Record<string, string> = {};
-    if (params?.integrations?.onePassword?.secrets) {
-      defaultEnv = await resolveOpSecretsInEnv(
-        params.integrations.onePassword.secrets,
-      );
-    }
+    const envForCreate = await mergeEnvWithOnePassword(
+      params?.integrations,
+      params?.env,
+    );
 
     const sandbox = await client.createSandbox({
       source: params?.source,
@@ -392,7 +386,8 @@ export class Sandbox {
       resources: params?.resources,
       runtime: params && "runtime" in params ? params?.runtime : undefined,
       networkPolicy: params?.networkPolicy,
-      env: params?.env,
+      env:
+        Object.keys(envForCreate).length > 0 ? envForCreate : undefined,
       signal: params?.signal,
       ...privateParams,
     });
@@ -401,7 +396,6 @@ export class Sandbox {
       client,
       sandbox: toSandboxSnapshot(sandbox.json.sandbox),
       routes: sandbox.json.routes,
-      defaultEnv,
     });
   }
 
@@ -430,18 +424,10 @@ export class Sandbox {
       ...privateParams,
     });
 
-    let defaultEnv: Record<string, string> = {};
-    if (params?.integrations?.onePassword?.secrets) {
-      defaultEnv = await resolveOpSecretsInEnv(
-        params.integrations.onePassword.secrets,
-      );
-    }
-
     return new Sandbox({
       client,
       sandbox: toSandboxSnapshot(sandbox.json.sandbox),
       routes: sandbox.json.routes,
-      defaultEnv,
     });
   }
 
@@ -456,17 +442,14 @@ export class Sandbox {
     client,
     routes,
     sandbox,
-    defaultEnv,
   }: {
     client?: APIClient;
     routes: SandboxRouteData[];
     sandbox: SandboxSnapshot;
-    defaultEnv?: Record<string, string>;
   }) {
     this._client = client ?? null;
     this.routes = routes;
     this.sandbox = sandbox;
-    this.defaultEnv = defaultEnv ?? {};
   }
 
   /**
@@ -541,6 +524,11 @@ export class Sandbox {
         ? { cmd: commandOrParams, args, signal: opts?.signal }
         : commandOrParams;
 
+    const envForRun = await mergeEnvWithOnePassword(
+      params.integrations,
+      params.env,
+    );
+
     const wait = params.detached ? false : true;
     const pipeLogs = async (command: Command): Promise<void> => {
       if (!params.stdout && !params.stderr) {
@@ -569,7 +557,7 @@ export class Sandbox {
         command: params.cmd,
         args: params.args ?? [],
         cwd: params.cwd,
-        env: { ...this.defaultEnv, ...(params.env ?? {}) },
+        env: envForRun,
         sudo: params.sudo ?? false,
         wait: true,
         signal: params.signal,
@@ -598,7 +586,7 @@ export class Sandbox {
       command: params.cmd,
       args: params.args ?? [],
       cwd: params.cwd,
-      env: { ...this.defaultEnv, ...(params.env ?? {}) },
+      env: envForRun,
       sudo: params.sudo ?? false,
       signal: params.signal,
     });
