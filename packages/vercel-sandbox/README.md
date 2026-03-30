@@ -175,6 +175,10 @@ await sandbox.runCommand({
 });
 ```
 
+### Security note
+
+Integrating with 1Password improves **security and convenience** compared to hard-coding secrets or scattering them across config: references stay in 1Password, access can follow **least privilege**, and rotation is centralized. After resolution, values are still **ordinary environment variables** inside the sandbox so use the same care you would with any secret (avoid logging env, protect `OP_SERVICE_ACCOUNT_TOKEN`, rotate if exposed)
+
 ### Service account token
 
 The integration needs a [1Password service account][op-service-account]. The SDK reads `OP_SERVICE_ACCOUNT_TOKEN` from the process environment when resolving `op://` references. You can set it in any of these ways:

@@ -46,6 +46,10 @@ function isOpReference(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.startsWith(OP_REF_PREFIX);
 }
+
+function loadOnePasswordSDK(): typeof import("@1password/sdk") {
+  return createRequire(import.meta.url)("@1password/sdk");
+}
 /**
  * Resolves any env values that are 1Password secret references (op://...).
  * Returns a new record with those values replaced by resolved secrets; non-op values are copied over.
@@ -72,9 +76,8 @@ export async function resolveOpSecretsInEnv(
     return env;
   }
 
-  const sdk = createRequire(import.meta.url)("@1password/sdk") as typeof import(
-    "@1password/sdk"
-  );
+  const sdk = loadOnePasswordSDK();
+
   const auth =
     process.env.OP_SERVICE_ACCOUNT_TOKEN ??
     (process.env.OP_ACCOUNT

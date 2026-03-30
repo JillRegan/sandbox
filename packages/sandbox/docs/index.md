@@ -74,7 +74,7 @@ Options:
     --vcpus <COUNT>                    Number of vCPUs to allocate (each vCPU includes 2048 MB of memory) [optional]
     --publish-port <PORT>, -p=<PORT>   Publish sandbox port(s) to DOMAIN.vercel.run
     --snapshot, -s <snapshot_id>       Start the sandbox from a snapshot ID [optional]
-    --env <key=value>, -e=<key=value>  Environment variables to set for the command
+    --env <key=value>, -e=<key=value>  Environment variables to set for the command. 1Password refs (op://...) supported.
     --network-policy <MODE>            Network policy mode: "allow-all" or "deny-all"
       - allow-all: sandbox can access any website/domain
       - deny-all: sandbox has no network access
@@ -123,7 +123,7 @@ Options:
     --vcpus <COUNT>                    Number of vCPUs to allocate (each vCPU includes 2048 MB of memory) [optional]
     --publish-port <PORT>, -p=<PORT>   Publish sandbox port(s) to DOMAIN.vercel.run
     --snapshot, -s <snapshot_id>       Start the sandbox from a snapshot ID [optional]
-    --env <key=value>, -e=<key=value>  Default environment variables for sandbox commands
+    --env <key=value>, -e=<key=value>  Default environment variables for sandbox commands. 1Password refs (op://...) supported.
     --network-policy <MODE>            Network policy mode: "allow-all" or "deny-all"
       - allow-all: sandbox can access any website/domain
       - deny-all: sandbox has no network access
@@ -258,7 +258,7 @@ Flags:
 Options:
 
     --workdir, -w <str>                The working directory to run the command in [optional]
-    --env <key=value>, -e=<key=value>  Environment variables to set for the command
+    --env <key=value>, -e=<key=value>  Environment variables to set for the command. 1Password refs (op://...) supported.
 
 Auth & Scope:
 
